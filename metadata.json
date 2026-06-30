@@ -1,0 +1,10 @@
+{
+  "name": "Remix: Mecánico Particular",
+  "description": "Aplicación operativa para gestión de taller, diagnóstico y peritaje inteligente mediante IA.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

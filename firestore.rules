@@ -1,0 +1,156 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- REUSABLE SECURITY HELPERS ---
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return isSignedIn();
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- ENTITY SCHEMAS & VALIDATION BLUEPRINTS ---
+
+    function isValidUser(data) {
+      return data.userId is string && data.userId.size() <= 128
+          && data.email is string && data.email.size() <= 256
+          && (!data.keys().hasAny(['displayName']) || (data.displayName is string && data.displayName.size() <= 150));
+    }
+
+    function isValidTallerConfig(data) {
+      return data.nombreComercial is string && data.nombreComercial.size() <= 100
+          && data.direccion is string && data.direccion.size() <= 200
+          && data.telefono is string && data.telefono.size() <= 30
+          && (!data.keys().hasAny(['razonSocial']) || (data.razonSocial is string && data.razonSocial.size() <= 150))
+          && (!data.keys().hasAny(['cif']) || (data.cif is string && data.cif.size() <= 30))
+          && (!data.keys().hasAny(['precioManoObra']) || (data.precioManoObra is number))
+          && (!data.keys().hasAny(['textoLegal']) || (data.textoLegal is string && data.textoLegal.size() <= 1000))
+          && (!data.keys().hasAny(['logoUrl']) || (data.logoUrl == null || (data.logoUrl is string && data.logoUrl.size() <= 1048576)))
+          && (!data.keys().hasAny(['geminiApiKey']) || (data.geminiApiKey is string && data.geminiApiKey.size() <= 100));
+    }
+
+    function isValidCliente(data) {
+      return data.id is string && data.id.size() <= 128
+          && data.nombre is string && data.nombre.size() <= 100
+          && data.matricula is string && data.matricula.size() <= 20
+          && data.userId is string && data.userId.size() <= 128 && data.userId == request.auth.uid
+          && (!data.keys().hasAny(['dni']) || (data.dni is string && data.dni.size() <= 30))
+          && (!data.keys().hasAny(['telefono']) || (data.telefono is string && data.telefono.size() <= 30))
+          && (!data.keys().hasAny(['marcaModelo']) || (data.marcaModelo is string && data.marcaModelo.size() <= 100))
+          && (!data.keys().hasAny(['enTaller']) || (data.enTaller is bool))
+          && (!data.keys().hasAny(['estadoActual']) || (data.estadoActual is string && data.estadoActual.size() <= 50))
+          && (!data.keys().hasAny(['historial']) || (data.historial is list));
+    }
+
+    function isValidDocumento(data) {
+      return data.id is string && data.id.size() <= 128
+          && data.cliente is string && data.cliente.size() <= 100
+          && data.matricula is string && data.matricula.size() <= 20
+          && data.userId is string && data.userId.size() <= 128 && data.userId == request.auth.uid
+          && (!data.keys().hasAny(['dni']) || (data.dni is string && data.dni.size() <= 30))
+          && (!data.keys().hasAny(['telefono']) || (data.telefono is string && data.telefono.size() <= 30))
+          && (!data.keys().hasAny(['vehiculo']) || (data.vehiculo is string && data.vehiculo.size() <= 100))
+          && (!data.keys().hasAny(['items']) || (data.items is list))
+          && (!data.keys().hasAny(['fecha']) || (data.fecha is string && data.fecha.size() <= 30));
+    }
+
+    function isValidAveriaResuelta(data) {
+      return data.id is string && data.id.size() <= 128
+          && data.titulo is string && data.titulo.size() <= 150
+          && data.solucion is string && data.solucion.size() <= 2000
+          && data.autor is string && data.autor.size() <= 100
+          && (!data.keys().hasAny(['sintomas']) || (data.sintomas is string && data.sintomas.size() <= 1000))
+          && (!data.keys().hasAny(['verificado']) || (data.verificado is bool))
+          && (!data.keys().hasAny(['userId']) || (data.userId is string && data.userId.size() <= 128))
+          && (!data.keys().hasAny(['createdAt']) || (data.createdAt is number));
+    }
+
+    // --- MATCH BLOCKS ---
+
+    // 1. Users Collection
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow create: if isVerified() && isOwner(userId) && isValidUser(incoming());
+      allow update: if isVerified() && isOwner(userId) && isValidUser(incoming()) && (
+        incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email'])
+      );
+      allow delete: if false; // Profiles cannot be deleted directly via client SDK
+    }
+
+    // 2. TallerConfig Collection
+    match /taller_config/{userId} {
+      allow get: if isOwner(userId);
+      allow create: if isVerified() && isOwner(userId) && isValidTallerConfig(incoming());
+      allow update: if isVerified() && isOwner(userId) && isValidTallerConfig(incoming()) && (
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'nombreComercial', 'razonSocial', 'cif', 'direccion', 'telefono', 
+          'precioManoObra', 'textoLegal', 'logoUrl', 'geminiApiKey'
+        ])
+      );
+      allow delete: if false;
+    }
+
+    // 3. Clientes Collection
+    match /clientes/{clienteId} {
+      allow get: if isVerified() && existing().userId == request.auth.uid;
+      allow list: if isVerified() && resource.data.userId == request.auth.uid;
+      allow create: if isVerified() && isValidId(clienteId) && isValidCliente(incoming()) && incoming().userId == request.auth.uid;
+      allow update: if isVerified() && isValidId(clienteId) && isValidCliente(incoming()) && existing().userId == request.auth.uid && (
+        // Action 1: State Change
+        (incoming().diff(existing()).affectedKeys().hasOnly(['enTaller', 'estadoActual'])) ||
+        // Action 2: Add Historial
+        (incoming().diff(existing()).affectedKeys().hasOnly(['historial'])) ||
+        // Action 3: General profile update
+        (incoming().diff(existing()).affectedKeys().hasOnly([
+          'nombre', 'dni', 'telefono', 'matricula', 'marcaModelo', 'enTaller', 'estadoActual', 'historial'
+        ]))
+      );
+      allow delete: if isVerified() && isValidId(clienteId) && existing().userId == request.auth.uid;
+    }
+
+    // 4. Documentos Collection
+    match /documentos/{documentoId} {
+      allow get: if isVerified() && existing().userId == request.auth.uid;
+      allow list: if isVerified() && resource.data.userId == request.auth.uid;
+      allow create: if isVerified() && isValidId(documentoId) && isValidDocumento(incoming()) && incoming().userId == request.auth.uid;
+      allow update: if isVerified() && isValidId(documentoId) && isValidDocumento(incoming()) && existing().userId == request.auth.uid && (
+        incoming().diff(existing()).affectedKeys().hasOnly(['cliente', 'dni', 'telefono', 'matricula', 'vehiculo', 'items', 'fecha'])
+      );
+      allow delete: if isVerified() && isValidId(documentoId) && existing().userId == request.auth.uid;
+    }
+
+    // 5. Comunidad Collection
+    match /comunidad/{averiaId} {
+      allow read: if isVerified(); // Any authenticated and verified user can view community solutions
+      allow create: if isVerified() && isValidId(averiaId) && isValidAveriaResuelta(incoming()) && incoming().userId == request.auth.uid;
+      allow update: if isVerified() && isValidId(averiaId) && isValidAveriaResuelta(incoming()) && existing().userId == request.auth.uid && (
+        incoming().diff(existing()).affectedKeys().hasOnly(['titulo', 'sintomas', 'solucion', 'autor', 'verificado', 'createdAt'])
+      );
+      allow delete: if isVerified() && isValidId(averiaId) && existing().userId == request.auth.uid;
+    }
+  }
+}
