@@ -68,8 +68,108 @@ function useLocalStorage<T>(key: string, initialValue: T): [T, (val: T | ((prev:
   return [value, setValueWrapper, isInit];
 }
 
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean; error: any }
+> {
+  state: { hasError: boolean; error: any };
+  props: { children: React.ReactNode };
+
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+    this.props = props;
+  }
+
+  static getDerivedStateFromError(error: any) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: any, errorInfo: any) {
+    console.error("ErrorBoundary caught an error:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      let friendlyMessage = "Ha ocurrido un error inesperado en la aplicación.";
+      let operationText = "";
+      let pathText = "";
+
+      try {
+        const errorMsg = this.state.error?.message || String(this.state.error);
+        if (errorMsg.trim().startsWith("{") && errorMsg.trim().endsWith("}")) {
+          const parsed = JSON.parse(errorMsg);
+          if (parsed && parsed.error) {
+            friendlyMessage = parsed.error;
+            if (parsed.error.includes("permission") || parsed.error.includes("Permission") || parsed.error.includes("insufficient")) {
+              friendlyMessage = "No tienes permisos suficientes para realizar esta acción de base de datos. Por favor, asegúrate de haber iniciado sesión de manera correcta.";
+            }
+            if (parsed.operationType) {
+              operationText = `Operación: ${parsed.operationType.toUpperCase()}`;
+            }
+            if (parsed.path) {
+              pathText = `Ruta: ${parsed.path}`;
+            }
+          }
+        } else {
+          friendlyMessage = errorMsg;
+        }
+      } catch (e) {
+        if (this.state.error?.message) {
+          friendlyMessage = this.state.error.message;
+        }
+      }
+
+      return (
+        <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6 text-center text-white">
+          <div className="max-w-md bg-slate-850 rounded-[2rem] p-8 shadow-2xl border border-slate-800">
+            <div className="w-16 h-16 bg-red-500/10 rounded-2xl flex items-center justify-center text-red-500 mx-auto mb-6 border border-red-500/20">
+              <AlertTriangle className="w-8 h-8" />
+            </div>
+            <h2 className="text-xl font-black text-white mb-2">Diagnóstico del Sistema</h2>
+            <p className="text-slate-400 text-sm mb-4 leading-relaxed">{friendlyMessage}</p>
+            
+            {(operationText || pathText) && (
+              <div className="bg-slate-900/50 p-4 rounded-xl mb-6 text-left border border-slate-800 font-mono text-[10px] text-slate-500 space-y-1">
+                {operationText && <p>{operationText}</p>}
+                {pathText && <p>{pathText}</p>}
+              </div>
+            )}
+
+            <div className="flex gap-3 justify-center">
+              <button
+                onClick={() => {
+                  window.location.reload();
+                }}
+                className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-5 py-3 rounded-xl shadow-lg hover:shadow-blue-500/20 transition-all cursor-pointer"
+              >
+                Recargar Aplicación
+              </button>
+              <button
+                onClick={() => {
+                  window.localStorage.clear();
+                  window.location.reload();
+                }}
+                className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs px-5 py-3 rounded-xl transition-all cursor-pointer"
+              >
+                Limpiar Caché
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
 export default function App() {
-  return <TallerApp />;
+  return (
+    <ErrorBoundary>
+      <TallerApp />
+    </ErrorBoundary>
+  );
 }
 
 function TallerApp() {
