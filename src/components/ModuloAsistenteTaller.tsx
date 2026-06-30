@@ -328,7 +328,7 @@ export default function ModuloAsistenteTaller({
           codigoOEMPrincipal: { type: "STRING" },
           otrosCodigosPosibles: { type: "ARRAY", items: { type: "STRING" } },
           tipoPintura: { type: "STRING" },
-          notesPericiales: { type: "STRING" },
+          notasPericiales: { type: "STRING" },
         },
         required: ["colorDetectado", "codigoOEMPrincipal", "otrosCodigosPosibles", "tipoPintura", "notasPericiales"],
       };
